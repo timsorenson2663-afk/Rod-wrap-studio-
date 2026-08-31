@@ -3408,6 +3408,157 @@ if (typeof originalRenderLibrary === 'function') {
 window.addEventListener('DOMContentLoaded', () => {
   syncPatternDropdownWithLibrary();
 });
+// --- THREAD STUDIO PRO: PICTORIAL SCRIPT BYPASS ENGINE ---
+
+let nativePictorialData = null;
+
+// 1. Intercept the Import Function
+const originalParse = window.parseAndSaveVisualWrapScript;
+window.parseAndSaveVisualWrapScript = function() {
+  const rawText = document.getElementById('importScriptText')?.value || '';
+  
+  // Detect if this is a raw Coordinate / Angel Fish format
+  if (rawText.includes("TITLE:") && rawText.includes("Cross X") && rawText.includes("Spool ")) {
+     const lines = rawText.split(/\r?\n/);
+     let title = "Imported Pictorial";
+     let spools = {};
+     let commands = [];
+
+     // Extract Spool Palette and Coordinate Commands
+     lines.forEach(line => {
+       let clean = line.trim();
+       if(clean.startsWith("TITLE:")) {
+         title = clean.replace("TITLE:", "").trim();
+       } else if (clean.startsWith("Spool ")) {
+         const parts = clean.split("~");
+         if (parts.length === 2) {
+           const sNum = parts[0].trim().split(/\s+/)[1];
+           const rgb = parts[1].trim().split(/\s+/).map(Number);
+           // Convert RGB to HEX safely
+           spools[sNum] = "#" + [rgb[0]||0, rgb[1]||0, rgb[2]||0].map(x => x.toString(16).padStart(2, '0')).join('');
+         }
+       } else if (clean.startsWith("Cross") || clean.startsWith("Box")) {
+         const isBox = clean.startsWith("Box");
+         const mx = clean.match(/X(?:1)?\s*(-?\d+)/i);
+         const my = clean.match(/Y(?:1)?\s*(-?\d+)/i);
+         const ms = clean.match(/Spool_Up\s*(\d+)/i);
+         const mp = clean.match(/passes\s*(\d+)/i);
+         
+         if (mx && my) {
+           commands.push({
+             type: isBox ? "BOX" : "CROSS",
+             x: parseInt(mx[1]),
+             y: parseInt(my[1]),
+             spool: ms ? ms[1] : "1",
+             passes: mp ? parseInt(mp[1]) : 1
+           });
+         }
+       }
+     });
+     
+     // Store the coordinate data and suspend the standard geometric layers
+     nativePictorialData = { title, spools, commands };
+     currentPatternTitle = title;
+     layers = []; 
+     
+     if (typeof renderLayersUI === 'function') renderLayersUI();
+     if (typeof syncAllEngines === 'function') syncAllEngines();
+     
+     const visTab = document.getElementById('t-vis');
+     if (visTab) visTab.checked = true;
+     
+     alert(`Loaded Pictorial Pattern: "${title}" mapped with ${commands.length} precise X/Y coordinate nodes!`);
+     return;
+  }
+  
+  // If standard geometric script, clear pictorial mode and run normal parser
+  nativePictorialData = null;
+  if (originalParse) originalParse();
+};
+
+// 2. Intercept the Tab 1 Visualizer Canvas
+const originalRenderPattern = window.renderPattern;
+window.renderPattern = function() {
+  if (!nativePictorialData) {
+    // Run normal 4-axis diamond rendering
+    if (originalRenderPattern) return originalRenderPattern();
+    return;
+  }
+
+  // Run Custom Coordinate X/Y Rendering for Pictorials
+  const canvas = document.getElementById('wrapCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  
+  ctx.fillStyle = "#0A0C10";
+  ctx.fillRect(0, 0, w, h);
+
+  const padLeft = 40, padRight = 20;
+  const plotW = w - padLeft - padRight;
+  const plotH = h - 60;
+  
+  // Draw Coordinate Grid
+  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padLeft, 0); ctx.lineTo(padLeft, plotH);
+  ctx.moveTo(w - padRight, 0); ctx.lineTo(w - padRight, plotH);
+  ctx.moveTo(padLeft, plotH/2); ctx.lineTo(w - padRight, plotH/2);
+  ctx.stroke();
+
+  // Plot explicit lines from the imported script
+  nativePictorialData.commands.forEach(cmd => {
+    let cx = padLeft + (cmd.x / 100) * plotW;
+    let cy = (cmd.y / 100) * plotH;
+    let color = nativePictorialData.spools[cmd.spool] || "#FFD700";
+    let thick = Math.max(1.5, cmd.passes * 0.8);
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = thick;
+    ctx.lineCap = "round";
+    
+    if (cmd.type === "CROSS") {
+       ctx.beginPath();
+       ctx.moveTo(cx - plotH/2, cy + plotH/2);
+       ctx.lineTo(cx + plotH/2, cy - plotH/2);
+       ctx.stroke();
+
+       ctx.beginPath();
+       ctx.moveTo(cx - plotH/2, cy - plotH/2);
+       ctx.lineTo(cx + plotH/2, cy + plotH/2);
+       ctx.stroke();
+    } else {
+       let r = thick * 3;
+       ctx.beginPath();
+       ctx.moveTo(cx, cy - r);
+       ctx.lineTo(cx + r, cy);
+       ctx.lineTo(cx, cy + r);
+       ctx.lineTo(cx - r, cy);
+       ctx.closePath();
+       ctx.stroke();
+    }
+  });
+  
+  // Apply visual watermark
+  ctx.fillStyle = "rgba(212, 175, 55, 0.9)";
+  ctx.font = "bold 12px monospace";
+  ctx.fillText(`PICTORIAL COORDINATE MODE: ${nativePictorialData.title}`, padLeft, plotH + 26);
+};
+
+// 3. Auto-Clear Pictorial Mode when returning to standard shop presets
+const originalApplyPreset = window.applyQuickPreset;
+window.applyQuickPreset = function(val) {
+  nativePictorialData = null;
+  if (originalApplyPreset) originalApplyPreset(val);
+};
+
+const originalAddLayer = window.addLayer;
+window.addLayer = function() {
+  nativePictorialData = null;
+  if (originalAddLayer) originalAddLayer();
+};
 
 </script>
 </body>
