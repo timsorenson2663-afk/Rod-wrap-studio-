@@ -3240,6 +3240,69 @@ function initApp() {
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initApp);
 else initApp();
+// --- THREAD STUDIO PRO: GRAPHIC & SYNCHRONIZATION UPGRADE PATCH ---
+
+// 1. High-DPI Retina Canvas Sharpness Booster
+function upgradeCanvasResolutions() {
+  const dpr = window.devicePixelRatio || 1;
+  if (dpr <= 1) return; // Standard resolution, skip scaling
+
+  const canvasIds = ['wrapCanvas', 'stepCanvas', 'rodCanvas3D'];
+  canvasIds.forEach(id => {
+    const canvas = document.getElementById(id);
+    if (!canvas) return;
+
+    // Save intended display dimensions if not already stored
+    if (!canvas.dataset.baseWidth) {
+      canvas.dataset.baseWidth = canvas.width;
+      canvas.dataset.baseHeight = canvas.height;
+    }
+
+    const baseW = parseInt(canvas.dataset.baseWidth);
+    const baseH = parseInt(canvas.dataset.baseHeight);
+
+    // Set internal buffer resolution higher for crisp rendering
+    canvas.width = baseW * dpr;
+    canvas.height = baseH * dpr;
+    
+    // Force CSS display size to match original layout bounds
+    canvas.style.width = baseW + 'px';
+    canvas.style.height = baseH + 'px';
+
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.scale(dpr, dpr);
+    }
+  });
+}
+
+// 2. Cross-Tab Synchronization Bus
+// Automatically propagates changes across calculators when inputs change
+function initCrossTabSync() {
+  const trackedInputs = [
+    'repeats', 'targetWrapLength', 'wrapUnit', 'patternAxis',
+    'buttDiam', 'tipDiam', 'rodTotalLength', 'totalGuides'
+  ];
+
+  trackedInputs.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener('input', () => {
+        // Safe cross-engine coordination without state corruption
+        if (typeof syncAllEngines === 'function') syncAllEngines();
+        if (typeof calculateLayout === 'function') calculateLayout();
+        if (typeof calculateGuideSpacing === 'function') calculateGuideSpacing();
+      });
+    }
+  });
+}
+
+// Run updates safely on load alongside your existing init routine
+window.addEventListener('DOMContentLoaded', () => {
+  upgradeCanvasResolutions();
+  initCrossTabSync();
+});
+
 </script>
 </body>
 </html>
