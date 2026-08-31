@@ -3266,6 +3266,99 @@ window.addEventListener('DOMContentLoaded', () => {
   initCrossTabSync();
 });
 
+// --- THREAD STUDIO PRO: WORKSHOP PRODUCTIVITY UPGRADE PATCH ---
+
+// 1. Low-Thread Inventory Alert Badge (Updates Tab 10 Label dynamically)
+function updateLowStockBadge() {
+  const libLabel = document.querySelector('label[for="t-lib"]');
+  if (!libLabel) return;
+  
+  let lowCount = 0;
+  const consumption = typeof calculateThreadConsumption === 'function' ? calculateThreadConsumption() : {};
+  
+  ownedThreads.forEach(id => {
+    const capacity = spoolCapacities[id] || 100;
+    const used = consumption[id] || 0;
+    const deduct = manualDeductions[id] || 0;
+    const remaining = Math.max(0, capacity - used - deduct);
+    if (remaining < 15) lowCount++;
+  });
+
+  if (lowCount > 0) {
+    libLabel.innerHTML = `10. Thread Inventory <span style="background:#e63946; color:#fff; padding:1px 5px; border-radius:10px; font-size:0.65rem; margin-left:4px;">${lowCount} Low</span>`;
+  } else {
+    libLabel.innerHTML = `10. Thread Inventory & Spools`;
+  }
+}
+
+// 2. Quick-Calculate Total Yardage Estimator (Injects into Pattern Visualizer tab)
+function injectYardageEstimator() {
+  const scalingSummary = document.getElementById('scalingSummary');
+  if (!scalingSummary || document.getElementById('quickYardageEstimateBox')) return;
+
+  const box = document.createElement('div');
+  box.id = 'quickYardageEstimateBox';
+  box.style.cssText = "margin-top: 6px; font-size: 0.78rem; color: var(--accent-cyan); font-weight: 600;";
+  scalingSummary.parentNode.insertBefore(box, scalingSummary.nextSibling);
+  updateYardageEstimatorText();
+}
+
+function updateYardageEstimatorText() {
+  const box = document.getElementById('quickYardageEstimateBox');
+  if (!box) return;
+
+  const consumption = typeof calculateThreadConsumption === 'function' ? calculateThreadConsumption() : {};
+  let totalYardsNeeded = 0;
+  Object.values(consumption).forEach(yds => totalYardsNeeded += yds);
+
+  box.innerHTML = `Estimated Pattern Consumption: ~<strong>${totalYardsNeeded.toFixed(1)} Yards</strong> total across all active bands`;
+}
+
+// 3. Compact Quick-Note Field in Master Vault (Injects note input into Build Recipe Save card)
+function injectBuildNotesField() {
+  const buildNameInput = document.getElementById('buildRecipeName');
+  if (!buildNameInput || document.getElementById('buildRecipeNotes')) return;
+
+  const groupDiv = document.createElement('div');
+  groupDiv.className = 'form-group';
+  groupDiv.style.marginTop = '8px';
+  groupDiv.innerHTML = `
+    <label>Epoxy / Build Notes & Delivery Date</label>
+    <input type="text" id="buildRecipeNotes" placeholder="e.g., Flex Coat High Build, Delivered Aug 31" />
+  `;
+  buildNameInput.parentNode.parentNode.insertBefore(groupDiv, buildNameInput.parentNode.nextSibling);
+
+  // Hook into saveCompleteBuildRecipe by wrapping it safely
+  const originalSave = window.saveCompleteBuildRecipe;
+  if (typeof originalSave === 'function') {
+    window.saveCompleteBuildRecipe = function() {
+      originalSave();
+      const notesVal = document.getElementById('buildRecipeNotes')?.value || "";
+      if (savedBuildRecipes.length > 0) {
+        savedBuildRecipes[0].notes = notesVal;
+        localStorage.setItem(STORAGE_PREFIX + "builds", JSON.stringify(savedBuildRecipes));
+        if (typeof renderVaultLists === 'function') renderVaultLists();
+      }
+    };
+  }
+}
+
+// Initialize all three new workshop features on load
+window.addEventListener('DOMContentLoaded', () => {
+  injectYardageEstimator();
+  injectBuildNotesField();
+  updateLowStockBadge();
+});
+
+// Update low stock badge whenever inventory or engine syncs
+const originalSync = window.syncAllEngines;
+if (typeof originalSync === 'function') {
+  window.syncAllEngines = function() {
+    originalSync();
+    updateLowStockBadge();
+    updateYardageEstimatorText();
+  };
+}
 
 </script>
 </body>
