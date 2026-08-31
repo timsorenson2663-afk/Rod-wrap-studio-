@@ -3408,6 +3408,157 @@ if (typeof originalRenderLibrary === 'function') {
 window.addEventListener('DOMContentLoaded', () => {
   syncPatternDropdownWithLibrary();
 });
+// --- THREAD STUDIO PRO: MULTI-FORMAT WRAP SCRIPT CLEANSER PATCH ---
+
+// 1. Update file input handler to accept both .vwp and .vwx extensions cleanly
+document.addEventListener('DOMContentLoaded', () => {
+  const fileInput = document.getElementById('vwpFileInput');
+  if (fileInput) {
+    fileInput.accept = ".vwp,.vwx,.txt";
+  }
+});
+
+// 2. Enhanced Universal Parser with Metadata & Header Filtering
+function parseAndSaveVisualWrapScript() {
+  const rawText = document.getElementById('importScriptText')?.value || '';
+  let nameInput = document.getElementById('importPatternName')?.value.trim() || ("Imported Pattern " + (savedPatternLibrary.length + 1));
+  
+  if (!rawText.trim()) {
+    alert("Please paste script code or select a pattern file first.");
+    return;
+  }
+
+  const lines = rawText.split(/\r?\n/);
+  const parsedLayers = [];
+  let detectedAxis = null;
+  const defaultSpools = masterThreadCatalog.filter(t => ownedThreads.includes(t.id));
+
+  lines.forEach(line => {
+    let clean = line.trim();
+    if (!clean) return;
+
+    const titleMatch = clean.match(/^TITLE\s*=\s*(.+)/i) || clean.match(/^PATTERN\s*=\s*(.+)/i);
+    if (titleMatch) {
+      nameInput = titleMatch[1].trim().replace(/['"]+/g, '');
+      const nameEl = document.getElementById('importPatternName');
+      if (nameEl) nameEl.value = nameInput;
+    }
+
+    const axisMatch = clean.match(/AXIS\s*[:=]\s*(\d+)/i) || clean.match(/LAYOUT\s*[:=]\s*(\d+)/i) || clean.match(/GRID\s*[:=]\s*(\d+)/i);
+    if (axisMatch) detectedAxis = parseInt(axisMatch[1]);
+  });
+
+  if (!detectedAxis) {
+    const fullUpper = (rawText + " " + nameInput).toUpperCase();
+    if (fullUpper.includes("8-POINT") || fullUpper.includes("8-AXIS") || fullUpper.includes("SPIDER")) detectedAxis = 8;
+    else if (fullUpper.includes("6-POINT") || fullUpper.includes("6-AXIS") || fullUpper.includes("HEX")) detectedAxis = 6;
+    else if (fullUpper.includes("2-AXIS")) detectedAxis = 2;
+    else detectedAxis = 4;
+  }
+
+  lines.forEach(line => {
+    let clean = line.trim();
+    if (!clean) return;
+
+    // Strip comments and file headers
+    clean = clean.split(';')[0].split('//')[0].split('#')[0].trim();
+    if (!clean) return;
+
+    // Filter out unwanted CAD metadata, blocks, or non-thread configuration lines
+    const upperClean = clean.toUpperCase();
+    if (upperClean.startsWith('[') || upperClean.startsWith('VERSION') || upperClean.startsWith('AUTHOR') || 
+        upperClean.startsWith('UNIT') || upperClean.startsWith('HEADER') || upperClean.includes('VECTORWORKS')) {
+      return;
+    }
+
+    if (clean.includes('=')) {
+      const parts = clean.split('=');
+      const val = parts.slice(1).join('=').trim();
+      if (val.includes(',')) clean = val;
+      else return;
+    }
+
+    if (!clean.includes(',') && clean.includes(' ')) clean = clean.replace(/\s+/g, ',');
+
+    const tokens = clean.split(',').map(t => t.trim().toUpperCase()).filter(t => t.length > 0);
+    if (tokens.length === 0) return;
+
+    let geo = "CROSS";
+    let direction = "OUT";
+    let passes = 4;
+    let spoolIndex = parsedLayers.length % (defaultSpools.length || 1);
+    let isValid = false;
+
+    const firstTok = tokens[0];
+
+    if (["CROSS", "BOX", "CHEVRON", "OFFSET", "DIAMOND", "STAR", "WRAP", "IN", "OUT"].includes(firstTok)) {
+      isValid = true;
+      if (firstTok === "BOX") geo = "BOX";
+      else if (firstTok === "CHEVRON") geo = "CHEVRON";
+      else if (firstTok === "OFFSET") geo = "OFFSET";
+
+      tokens.forEach((tok) => {
+        if (tok === "IN" || tok === "OUT" || tok === "BOX") direction = tok;
+        if (tok.startsWith("COLOR_") || tok.startsWith("COL_") || tok.startsWith("C_") || tok.startsWith("C")) {
+          const cNum = parseInt(tok.replace(/\D/g, ''));
+          if (!isNaN(cNum) && cNum > 0) spoolIndex = (cNum - 1) % (defaultSpools.length || 1);
+        }
+      });
+      
+      // Look for explicit numeric pass counts
+      const numTokens = tokens.map(t => parseInt(t)).filter(n => !isNaN(n) && n > 0 && n <= 50);
+      if (numTokens.length > 0) passes = numTokens[numTokens.length - 1];
+
+    } else {
+      const numbers = tokens.map(t => parseInt(t.replace(/\D/g, ''))).filter(n => !isNaN(n));
+      if (numbers.length >= 2) {
+        isValid = true;
+        passes = numbers[1] > 0 && numbers[1] <= 30 ? numbers[1] : 4;
+      }
+    }
+
+    // Guard against runaway loops or false positive passes from coordinate headers
+    if (isValid && passes > 0 && passes <= 30) {
+      const selectedSpool = defaultSpools[spoolIndex] || masterThreadCatalog[0];
+      parsedLayers.push({
+        threadId: selectedSpool.id,
+        geo: geo,
+        offset: parsedLayers.length * 10,
+        passes: passes,
+        type: direction
+      });
+    }
+  });
+
+  if (parsedLayers.length === 0) {
+    alert("Could validly parse thread passes. Ensure the script contains valid wrap line commands.");
+    return;
+  }
+
+  const finalName = document.getElementById('importPatternName')?.value.trim() || nameInput;
+  const newPattern = { name: finalName, axis: detectedAxis, layers: parsedLayers };
+
+  savedPatternLibrary.unshift(newPattern);
+  try {
+    localStorage.setItem(STORAGE_PREFIX + "pats", JSON.stringify(savedPatternLibrary));
+  } catch (e) {}
+
+  currentPatternTitle = newPattern.name;
+  layers = JSON.parse(JSON.stringify(newPattern.layers));
+  
+  const axEl = document.getElementById('patternAxis');
+  if (axEl) axEl.value = newPattern.axis;
+
+  if (typeof renderPatternLibraryList === 'function') renderPatternLibraryList();
+  if (typeof syncPatternDropdownWithLibrary === 'function') syncPatternDropdownWithLibrary();
+  renderLayersUI();
+  syncAllEngines();
+
+  const stepRadio = document.getElementById('t-step');
+  if (stepRadio) stepRadio.checked = true;
+
+  alert(`Successfully cleaned and imported "${finalName}" with ${parsedLayers.length} valid thread bands!`);
+}
 
 </script>
 </body>
