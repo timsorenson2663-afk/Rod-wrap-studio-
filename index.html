@@ -3559,13 +3559,165 @@ function parseAndSaveVisualWrapScript() {
   if (stepRadio) stepRadio.checked = true;
 
   alert(`Successfully cleaned and imported "${finalName}" with ${parsedLayers.length} valid thread bands!`);
-    // --- THREAD STUDIO PRO: VISUALWRAP THREAD-PATH ENGINE ---
+// --- THREAD STUDIO PRO: MULTI-FORMAT WRAP SCRIPT CLEANSER PATCH ---
+
+document.addEventListener('DOMContentLoaded', () => {
+  const fileInput = document.getElementById('vwpFileInput');
+  if (fileInput) {
+    fileInput.accept = ".vwp,.vwx,.txt";
+  }
+});
+
+function parseAndSaveVisualWrapScript() {
+  const rawText = document.getElementById('importScriptText')?.value || '';
+  let nameInput = document.getElementById('importPatternName')?.value.trim() || ("Imported Pattern " + (savedPatternLibrary.length + 1));
+  
+  if (!rawText.trim()) {
+    alert("Please paste script code or select a pattern file first.");
+    return;
+  }
+
+  // Check if this is a native VisualWRAP script containing Spool color definitions or explicit Cross/Box coordinate commands
+  if (rawText.includes("Spool ") || rawText.includes("Cross X") || rawText.includes("TITLE:")) {
+    importAndRenderNativeScript();
+    return;
+  }
+
+  const lines = rawText.split(/\r?\n/);
+  const parsedLayers = [];
+  let detectedAxis = null;
+  const defaultSpools = masterThreadCatalog.filter(t => ownedThreads.includes(t.id));
+
+  lines.forEach(line => {
+    let clean = line.trim();
+    if (!clean) return;
+
+    const titleMatch = clean.match(/^TITLE\s*=\s*(.+)/i) || clean.match(/^PATTERN\s*=\s*(.+)/i);
+    if (titleMatch) {
+      nameInput = titleMatch[1].trim().replace(/['"]+/g, '');
+      const nameEl = document.getElementById('importPatternName');
+      if (nameEl) nameEl.value = nameInput;
+    }
+
+    const axisMatch = clean.match(/AXIS\s*[:=]\s*(\d+)/i) || clean.match(/LAYOUT\s*[:=]\s*(\d+)/i) || clean.match(/GRID\s*[:=]\s*(\d+)/i);
+    if (axisMatch) detectedAxis = parseInt(axisMatch[1]);
+  });
+
+  if (!detectedAxis) {
+    const fullUpper = (rawText + " " + nameInput).toUpperCase();
+    if (fullUpper.includes("8-POINT") || fullUpper.includes("8-AXIS") || fullUpper.includes("SPIDER")) detectedAxis = 8;
+    else if (fullUpper.includes("6-POINT") || fullUpper.includes("6-AXIS") || fullUpper.includes("HEX")) detectedAxis = 6;
+    else if (fullUpper.includes("2-AXIS")) detectedAxis = 2;
+    else detectedAxis = 4;
+  }
+
+  lines.forEach(line => {
+    let clean = line.trim();
+    if (!clean) return;
+
+    clean = clean.split(';')[0].split('//')[0].split('#')[0].trim();
+    if (!clean) return;
+
+    const upperClean = clean.toUpperCase();
+    if (upperClean.startsWith('[') || upperClean.startsWith('VERSION') || upperClean.startsWith('AUTHOR') || 
+        upperClean.startsWith('UNIT') || upperClean.startsWith('HEADER') || upperClean.includes('VECTORWORKS')) {
+      return;
+    }
+
+    if (clean.includes('=')) {
+      const parts = clean.split('=');
+      const val = parts.slice(1).join('=').trim();
+      if (val.includes(',')) clean = val;
+      else return;
+    }
+
+    if (!clean.includes(',') && clean.includes(' ')) clean = clean.replace(/\s+/g, ',');
+
+    const tokens = clean.split(',').map(t => t.trim().toUpperCase()).filter(t => t.length > 0);
+    if (tokens.length === 0) return;
+
+    let geo = "CROSS";
+    let direction = "OUT";
+    let passes = 4;
+    let spoolIndex = parsedLayers.length % (defaultSpools.length || 1);
+    let isValid = false;
+
+    const firstTok = tokens[0];
+
+    if (["CROSS", "BOX", "CHEVRON", "OFFSET", "DIAMOND", "STAR", "WRAP", "IN", "OUT"].includes(firstTok)) {
+      isValid = true;
+      if (firstTok === "BOX") geo = "BOX";
+      else if (firstTok === "CHEVRON") geo = "CHEVRON";
+      else if (firstTok === "OFFSET") geo = "OFFSET";
+
+      tokens.forEach((tok) => {
+        if (tok === "IN" || tok === "OUT" || tok === "BOX") direction = tok;
+        if (tok.startsWith("COLOR_") || tok.startsWith("COL_") || tok.startsWith("C_") || tok.startsWith("C")) {
+          const cNum = parseInt(tok.replace(/\D/g, ''));
+          if (!isNaN(cNum) && cNum > 0) spoolIndex = (cNum - 1) % (defaultSpools.length || 1);
+        }
+      });
+      
+      const numTokens = tokens.map(t => parseInt(t)).filter(n => !isNaN(n) && n > 0 && n <= 50);
+      if (numTokens.length > 0) passes = numTokens[numTokens.length - 1];
+
+    } else {
+      const numbers = tokens.map(t => parseInt(t.replace(/\D/g, ''))).filter(n => !isNaN(n));
+      if (numbers.length >= 2) {
+        isValid = true;
+        passes = numbers[1] > 0 && numbers[1] <= 30 ? numbers[1] : 4;
+      }
+    }
+
+    if (isValid && passes > 0 && passes <= 30) {
+      const selectedSpool = defaultSpools[spoolIndex] || masterThreadCatalog[0];
+      parsedLayers.push({
+        threadId: selectedSpool.id,
+        geo: geo,
+        offset: parsedLayers.length * 10,
+        passes: passes,
+        type: direction
+      });
+    }
+  });
+
+  if (parsedLayers.length === 0) {
+    alert("Could validly parse thread passes. Ensure the script contains valid wrap line commands.");
+    return;
+  }
+
+  const finalName = document.getElementById('importPatternName')?.value.trim() || nameInput;
+  const newPattern = { name: finalName, axis: detectedAxis, layers: parsedLayers };
+
+  savedPatternLibrary.unshift(newPattern);
+  try {
+    localStorage.setItem(STORAGE_PREFIX + "pats", JSON.stringify(savedPatternLibrary));
+  } catch (e) {}
+
+  currentPatternTitle = newPattern.name;
+  layers = JSON.parse(JSON.stringify(newPattern.layers));
+  
+  const axEl = document.getElementById('patternAxis');
+  if (axEl) axEl.value = newPattern.axis;
+
+  if (typeof renderPatternLibraryList === 'function') renderPatternLibraryList();
+  if (typeof syncPatternDropdownWithLibrary === 'function') syncPatternDropdownWithLibrary();
+  renderLayersUI();
+  syncAllEngines();
+
+  const stepRadio = document.getElementById('t-step');
+  if (stepRadio) stepRadio.checked = true;
+
+  alert(`Successfully cleaned and imported "${finalName}" with ${parsedLayers.length} valid thread bands!`);
+}
+
+// --- VISUALWRAP NATIVE THREAD-PATH ENGINE ---
 
 function parseVisualWrapNativeScript(rawText) {
   const lines = rawText.split(/\r?\n/);
   let patternTitle = "Untitled Pattern";
   let parsedSpools = {};
-  let threadCommands = [];
+  let parsedLayers = [];
 
   lines.forEach(line => {
     let clean = line.trim();
@@ -3591,34 +3743,28 @@ function parseVisualWrapNativeScript(rawText) {
 
     if (clean.startsWith("Cross") || clean.startsWith("Box")) {
       const isBox = clean.startsWith("Box");
-      const xMatch = clean.match(/X(?:1)?\s*(-?\d+)/i);
-      const yMatch = clean.match(/Y(?:1)?\s*(-?\d+)/i);
       const spoolUpMatch = clean.match(/Spool_Up\s*(\d+)/i);
-      const spoolDnMatch = clean.match(/Spool_Dn\s*(\d+)/i);
       const passesMatch = clean.match(/passes\s*(\d+)/i);
-      const isUp = /Up/i.test(clean);
-      const isDown = /Down/i.test(clean);
+      
+      const spoolId = spoolUpMatch ? spoolUpMatch[1] : "1";
+      const passes = passesMatch ? parseInt(passesMatch[1]) : 4;
+      const targetHex = parsedSpools[spoolId]?.hex || "#d4af37";
 
-      const x = xMatch ? parseInt(xMatch[1]) : 50;
-      const y = yMatch ? parseInt(yMatch[1]) : 50;
-      const spoolUp = spoolUpMatch ? spoolUpMatch[1] : "1";
-      const spoolDn = spoolDnMatch ? spoolDnMatch[1] : "1";
-      const passes = passesMatch ? parseInt(passesMatch[1]) : 1;
+      // Map native coordinate blocks into clean standard layers so your normal visualizer & workbench engines render them without errors
+      let matchedThread = masterThreadCatalog.find(t => t.hex.toLowerCase() === targetHex.toLowerCase());
+      if (!matchedThread) matchedThread = masterThreadCatalog[0];
 
-      threadCommands.push({
-        type: isBox ? "BOX" : "CROSS",
-        x: x,
-        y: y,
-        spoolUp: spoolUp,
-        spoolDn: spoolDn,
-        passes: passes,
-        isUp: isUp,
-        isDown: isDown
+      parsedLayers.push({
+        threadId: matchedThread.id,
+        geo: isBox ? "BOX" : "CROSS",
+        offset: parsedLayers.length * 10,
+        passes: Math.min(passes, 12),
+        type: "OUT"
       });
     }
   });
 
-  return { title: patternTitle, spools: parsedSpools, commands: threadCommands };
+  return { title: patternTitle, layers: parsedLayers };
 }
 
 function rgbToHex(r, g, b) {
@@ -3636,61 +3782,31 @@ function importAndRenderNativeScript() {
   }
 
   const parsed = parseVisualWrapNativeScript(rawText);
-  if (parsed.commands.length === 0) {
-    alert("No valid thread passes found in script.");
+  if (parsed.layers.length === 0) {
+    alert("No valid coordinate passes found in native script.");
     return;
   }
 
   currentPatternTitle = parsed.title;
-  const canvas = document.getElementById('visCanvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width;
-  const h = canvas.height;
+  layers = parsed.layers;
 
-  // Clear blank canvas
-  ctx.fillStyle = "#0A0D14";
-  ctx.fillRect(0, 0, w, h);
+  const newPattern = { name: parsed.title, axis: 4, layers: layers };
+  savedPatternLibrary.unshift(newPattern);
+  try {
+    localStorage.setItem(STORAGE_PREFIX + "pats", JSON.stringify(savedPatternLibrary));
+  } catch (e) {}
 
-  // Thread width scaling
-  const threadThickness = Math.max(1.2, h / 200);
-
-  // Sequentially plot thread paths
-  parsed.commands.forEach(cmd => {
-    const cx = (cmd.x / 100) * w;
-    const cy = (cmd.y / 100) * h;
-    const colorUp = parsed.spools[cmd.spoolUp]?.hex || "#CCA43B";
-    const colorDn = parsed.spools[cmd.spoolDn]?.hex || "#00D2FF";
-
-    for (let p = 0; p < cmd.passes; p++) {
-      const offset = (p - cmd.passes / 2) * threadThickness;
-
-      if (cmd.isUp || (!cmd.isUp && !cmd.isDown)) {
-        ctx.strokeStyle = colorUp;
-        ctx.lineWidth = threadThickness;
-        ctx.beginPath();
-        ctx.moveTo(cx + offset - h, cy + h);
-        ctx.lineTo(cx + offset + h, cy - h);
-        ctx.stroke();
-      }
-
-      if (cmd.isDown || (!cmd.isUp && !cmd.isDown)) {
-        ctx.strokeStyle = colorDn;
-        ctx.lineWidth = threadThickness;
-        ctx.beginPath();
-        ctx.moveTo(cx + offset - h, cy - h);
-        ctx.lineTo(cx + offset + h, cy + h);
-        ctx.stroke();
-      }
-    }
-  });
+  if (typeof renderPatternLibraryList === 'function') renderPatternLibraryList();
+  if (typeof syncPatternDropdownWithLibrary === 'function') syncPatternDropdownWithLibrary();
+  renderLayersUI();
+  syncAllEngines();
 
   const visTab = document.getElementById('t-vis');
   if (visTab) visTab.checked = true;
 
-  alert(`Loaded: "${parsed.title}" (${parsed.commands.length} thread commands mapped)`);
+  alert(`Successfully loaded native script: "${parsed.title}" with ${layers.length} coordinate bands!`);
 }
- 
+
 </script>
 </body>
 </html>
