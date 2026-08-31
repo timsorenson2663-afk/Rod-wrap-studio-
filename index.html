@@ -495,7 +495,7 @@
             </select>
           </div>
           <div class="form-group">
-            <label>Industry Presets</label>
+            <label>Pattern Selection</label>
             <select id="quickPreset" onchange="applyQuickPreset(this.value)">
               <option value="diamond" selected>4-Color Traditional Diamond</option>
               <option value="stJohns">St. John's Cross (3-Tone)</option>
@@ -3359,6 +3359,55 @@ if (typeof originalSync === 'function') {
     updateYardageEstimatorText();
   };
 }
+// --- THREAD STUDIO PRO: PATTERN DROPDOWN SYNCHRONIZATION PATCH ---
+
+// Dynamically populate Tab 1's Quick Preset dropdown with all saved/imported patterns
+function syncPatternDropdownWithLibrary() {
+  const presetSelect = document.getElementById('quickPreset');
+  if (!presetSelect) return;
+
+  // Preserve current selection if possible
+  const currentVal = presetSelect.value;
+
+  let html = '';
+  // Combine default presets and user library patterns
+  const allPatterns = [...(typeof savedPatternLibrary !== 'undefined' ? savedPatternLibrary : DEFAULT_PATTERNS)];
+
+  allPatterns.forEach((pat, idx) => {
+    // Use a clean lookup value (index-based or name-based)
+    html += `<option value="lib_${idx}">${pat.name} (${pat.axis || 4}-Axis)</option>`;
+  });
+
+  presetSelect.innerHTML = html;
+  presetSelect.value = currentVal;
+}
+
+// Override applyQuickPreset to support both system types and library index values
+const originalApplyQuickPreset = window.applyQuickPreset;
+window.applyQuickPreset = function(val) {
+  if (val.startsWith('lib_')) {
+    const idx = parseInt(val.replace('lib_', ''));
+    if (typeof loadPatternFromLibrary === 'function') {
+      loadPatternFromLibrary(idx);
+    }
+  } else if (typeof originalApplyQuickPreset === 'function') {
+    originalApplyQuickPreset(val);
+  }
+};
+
+// Hook into library updates so the dropdown refreshes automatically
+const originalRenderLibrary = window.renderPatternLibraryList;
+if (typeof originalRenderLibrary === 'function') {
+  window.renderPatternLibraryList = function() {
+    originalRenderLibrary();
+    syncPatternDropdownWithLibrary();
+  };
+}
+
+// Run on initial load
+window.addEventListener('DOMContentLoaded', () => {
+  syncPatternDropdownWithLibrary();
+});
 
 </script>
 </body>
