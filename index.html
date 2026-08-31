@@ -3559,13 +3559,13 @@ function parseAndSaveVisualWrapScript() {
   if (stepRadio) stepRadio.checked = true;
 
   alert(`Successfully cleaned and imported "${finalName}" with ${parsedLayers.length} valid thread bands!`);
-// --- VISUALWRAP NATIVE SCRIPT PARSER & RENDERER ---
+    // --- THREAD STUDIO PRO: VISUALWRAP THREAD-PATH ENGINE ---
 
 function parseVisualWrapNativeScript(rawText) {
   const lines = rawText.split(/\r?\n/);
   let patternTitle = "Untitled Pattern";
   let parsedSpools = {};
-  let parsedLayers = [];
+  let threadCommands = [];
 
   lines.forEach(line => {
     let clean = line.trim();
@@ -3584,40 +3584,46 @@ function parseVisualWrapNativeScript(rawText) {
         const spoolName = leftParts.slice(2).join(" ") || ("Spool " + spoolNum);
         const rgbVals = parts[1].trim().split(/\s+/).map(Number);
         const hex = rgbToHex(rgbVals[0] || 0, rgbVals[1] || 0, rgbVals[2] || 0);
-        parsedSpools[spoolNum] = { id: "spool_" + spoolNum, name: spoolName, hex: hex };
+        parsedSpools[spoolNum] = { name: spoolName, hex: hex };
       }
       return;
     }
 
     if (clean.startsWith("Cross") || clean.startsWith("Box")) {
       const isBox = clean.startsWith("Box");
-      const xMatch = clean.match(/X\s*(-?\d+)/i) || clean.match(/X1\s*(-?\d+)/i);
-      const yMatch = clean.match(/Y\s*(-?\d+)/i) || clean.match(/Y1\s*(-?\d+)/i);
+      const xMatch = clean.match(/X(?:1)?\s*(-?\d+)/i);
+      const yMatch = clean.match(/Y(?:1)?\s*(-?\d+)/i);
       const spoolUpMatch = clean.match(/Spool_Up\s*(\d+)/i);
+      const spoolDnMatch = clean.match(/Spool_Dn\s*(\d+)/i);
       const passesMatch = clean.match(/passes\s*(\d+)/i);
+      const isUp = /Up/i.test(clean);
+      const isDown = /Down/i.test(clean);
 
       const x = xMatch ? parseInt(xMatch[1]) : 50;
       const y = yMatch ? parseInt(yMatch[1]) : 50;
-      const spoolId = spoolUpMatch ? spoolUpMatch[1] : "1";
-      const passes = passesMatch ? parseInt(passesMatch[1]) : 4;
+      const spoolUp = spoolUpMatch ? spoolUpMatch[1] : "1";
+      const spoolDn = spoolDnMatch ? spoolDnMatch[1] : "1";
+      const passes = passesMatch ? parseInt(passesMatch[1]) : 1;
 
-      parsedLayers.push({
+      threadCommands.push({
         type: isBox ? "BOX" : "CROSS",
         x: x,
         y: y,
-        spool: spoolId,
+        spoolUp: spoolUp,
+        spoolDn: spoolDn,
         passes: passes,
-        color: parsedSpools[spoolId] ? parsedSpools[spoolId].hex : "#00d2ff"
+        isUp: isUp,
+        isDown: isDown
       });
     }
   });
 
-  return { title: patternTitle, spools: parsedSpools, layers: parsedLayers };
+  return { title: patternTitle, spools: parsedSpools, commands: threadCommands };
 }
 
 function rgbToHex(r, g, b) {
   return "#" + [r, g, b].map(x => {
-    const hex = x.toString(16);
+    const hex = Math.max(0, Math.min(255, x)).toString(16);
     return hex.length === 1 ? "0" + hex : hex;
   }).join('');
 }
@@ -3629,27 +3635,62 @@ function importAndRenderNativeScript() {
     return;
   }
 
-  const parsedData = parseVisualWrapNativeScript(rawText);
-  
-  layers = parsedData.layers.map(l => ({
-    threadId: l.spool,
-    geo: l.type,
-    offset: l.x,
-    passes: l.passes,
-    type: "OUT"
-  }));
+  const parsed = parseVisualWrapNativeScript(rawText);
+  if (parsed.commands.length === 0) {
+    alert("No valid thread passes found in script.");
+    return;
+  }
 
-  currentPatternTitle = parsedData.title;
-  
-  if (typeof renderLayersUI === 'function') renderLayersUI();
-  if (typeof syncAllEngines === 'function') syncAllEngines();
+  currentPatternTitle = parsed.title;
+  const canvas = document.getElementById('visCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // Clear blank canvas
+  ctx.fillStyle = "#0A0D14";
+  ctx.fillRect(0, 0, w, h);
+
+  // Thread width scaling
+  const threadThickness = Math.max(1.2, h / 200);
+
+  // Sequentially plot thread paths
+  parsed.commands.forEach(cmd => {
+    const cx = (cmd.x / 100) * w;
+    const cy = (cmd.y / 100) * h;
+    const colorUp = parsed.spools[cmd.spoolUp]?.hex || "#CCA43B";
+    const colorDn = parsed.spools[cmd.spoolDn]?.hex || "#00D2FF";
+
+    for (let p = 0; p < cmd.passes; p++) {
+      const offset = (p - cmd.passes / 2) * threadThickness;
+
+      if (cmd.isUp || (!cmd.isUp && !cmd.isDown)) {
+        ctx.strokeStyle = colorUp;
+        ctx.lineWidth = threadThickness;
+        ctx.beginPath();
+        ctx.moveTo(cx + offset - h, cy + h);
+        ctx.lineTo(cx + offset + h, cy - h);
+        ctx.stroke();
+      }
+
+      if (cmd.isDown || (!cmd.isUp && !cmd.isDown)) {
+        ctx.strokeStyle = colorDn;
+        ctx.lineWidth = threadThickness;
+        ctx.beginPath();
+        ctx.moveTo(cx + offset - h, cy - h);
+        ctx.lineTo(cx + offset + h, cy + h);
+        ctx.stroke();
+      }
+    }
+  });
 
   const visTab = document.getElementById('t-vis');
   if (visTab) visTab.checked = true;
 
-  alert(`Successfully loaded native pattern: "${parsedData.title}" with ${layers.length} coordinate nodes!`);
+  alert(`Loaded: "${parsed.title}" (${parsed.commands.length} thread commands mapped)`);
 }
-
+ 
 </script>
 </body>
 </html>
