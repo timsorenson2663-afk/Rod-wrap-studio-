@@ -856,7 +856,7 @@
         
         <div style="background: #080a0f; border: 1px dashed var(--accent-gold); border-radius: 6px; padding: 12px; margin-bottom: 14px;">
           <label style="color: var(--accent-gold);">📁 Load .vwp File from Downloads</label>
-          <input type="file" id="vwpFileInput" accept=".vwp,.vwx,.txt*" onchange="handleVwpFileUpload(event)" style="padding: 6px; font-size: 0.82rem; cursor: pointer;" />
+          <input type="file" id="vwpFileInput" accept=".vwp,.txt" onchange="handleVwpFileUpload(event)" style="padding: 6px; font-size: 0.82rem; cursor: pointer;" />
           <p style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">Supports all ThreadCentral, VisualWRAP v1/v2, INI, and custom scripts.</p>
         </div>
 
@@ -3043,101 +3043,14 @@ function copyScript() {
 }
 
 // UNIVERSAL VISUALWRAP PARSER
-// PATCHED VISUALWRAP PARSER
 function parseAndSaveVisualWrapScript() {
   const rawText = document.getElementById('importScriptText')?.value || '';
   let nameInput = document.getElementById('importPatternName')?.value.trim() || ("Imported Pattern " + (savedPatternLibrary.length + 1));
   
   if (!rawText.trim()) {
-    alert("Please paste script code or choose a file first.");
+    alert("Please paste VisualWRAP script code or choose a .vwp file first.");
     return;
   }
-
-  const lines = rawText.split(/\r?\n/);
-  const parsedLayers = [];
-  let detectedAxis = 4;
-  const defaultSpools = masterThreadCatalog.filter(t => ownedThreads.includes(t.id));
-  const fallbackSpool = defaultSpools[0] || masterThreadCatalog[0];
-
-  // Pass 1: Detect explicit axis definitions
-  lines.forEach(line => {
-    let clean = line.trim();
-    if (!clean) return;
-    const axisMatch = clean.match(/AXIS\s*[:=]\s*(\d+)/i) || clean.match(/LAYOUT\s*[:=]\s*(\d+)/i);
-    if (axisMatch) detectedAxis = parseInt(axisMatch[1]);
-  });
-
-  // Pass 2: Clean and strict token parser to prevent 14-layer bloat
-  lines.forEach(line => {
-    let clean = line.split(';')[0].split('//')[0].split('#')[0].trim();
-    if (!clean || clean.startsWith('[')) return;
-
-    const upper = clean.toUpperCase();
-    let geo = "CROSS";
-    if (upper.includes("BOX")) geo = "BOX";
-    else if (upper.includes("CHEVRON")) geo = "CHEVRON";
-    else if (upper.includes("OFFSET")) geo = "OFFSET";
-
-    let direction = "OUT";
-    if (upper.includes("IN")) direction = "IN";
-    else if (upper.includes("BOX")) direction = "BOX";
-
-    // Extract numbers safely to find pass counts and color mappings
-    const numbers = clean.replace(/[^0-9,]/g, '').split(',').map(n => parseInt(n)).filter(n => !isNaN(n));
-    let passes = 4;
-    let spoolIndex = parsedLayers.length % (defaultSpools.length || 1);
-
-    if (numbers.length > 0) {
-      // Look for a reasonable pass count (typically 1 to 20)
-      const validPass = numbers.reverse().find(n => n > 0 && n <= 30);
-      if (validPass) passes = validPass;
-    }
-
-    // Check for explicit color identifiers
-    if (upper.includes("COLOR_2") || upper.includes("COL_2") || upper.includes("C2")) {
-      spoolIndex = 1;
-    }
-
-    // Only add a layer if it represents an actual structural instruction line
-    if (upper.includes("CROSS") || upper.includes("BOX") || upper.includes("CHEVRON") || upper.includes("OFFSET") || upper.includes(",")) {
-      const selectedSpool = defaultSpools[spoolIndex] || fallbackSpool;
-      parsedLayers.push({
-        threadId: selectedSpool.id,
-        geo: geo,
-        offset: parsedLayers.length * 12,
-        passes: passes,
-        type: direction
-      });
-    }
-  });
-
-  // Fallback safety if the script uses custom non-standard lines
-  if (parsedLayers.length === 0) {
-    parsedLayers.push({ threadId: fallbackSpool.id, geo: "CROSS", offset: 0, passes: 4, type: "OUT" });
-  }
-
-  const finalName = document.getElementById('importPatternName')?.value.trim() || nameInput;
-  const newPattern = { name: finalName, axis: detectedAxis, layers: parsedLayers };
-
-  savedPatternLibrary.unshift(newPattern);
-  try {
-    localStorage.setItem(STORAGE_PREFIX + "pats", JSON.stringify(savedPatternLibrary));
-  } catch (e) {}
-
-  currentPatternTitle = newPattern.name;
-  layers = JSON.parse(JSON.stringify(newPattern.layers));
-  
-  const axEl = document.getElementById('patternAxis');
-  if (axEl) axEl.value = newPattern.axis;
-
-  renderPatternLibraryList();
-  renderLayersUI();
-  populateGuideColorDropdowns();
-  syncAllEngines();
-
-  document.getElementById('t-step').checked = true;
-  alert(`Successfully loaded "${finalName}" with ${parsedLayers.length} correct bands!`);
-}
 
   const lines = rawText.split(/\r?\n/);
   const parsedLayers = [];
