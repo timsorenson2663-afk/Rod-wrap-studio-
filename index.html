@@ -3410,5 +3410,53 @@ window.addEventListener('DOMContentLoaded', () => {
 });
 
 </script>
+// --- THREAD STUDIO PRO: CUSTOM PATTERN CREATOR PATCH ---
+
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(injectCustomPatternSaver, 500);
+});
+
+function injectCustomPatternSaver() {
+  const renderBtn = document.querySelector('#panel-vis .card:nth-child(2) button.btn');
+  if (!renderBtn || document.getElementById('saveCustomPatternBtn')) return;
+
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.id = 'saveCustomPatternBtn';
+  saveBtn.className = 'btn btn-outline';
+  saveBtn.style.marginTop = '8px';
+  saveBtn.innerHTML = '💾 Save Design to Pattern Library';
+  saveBtn.onclick = promptAndSaveCustomPattern;
+
+  renderBtn.parentNode.insertBefore(saveBtn, renderBtn.nextSibling);
+}
+
+function promptAndSaveCustomPattern() {
+  const patternName = prompt("Enter a name for your custom thread pattern:", "My Custom Shop Weave");
+  if (!patternName || !patternName.trim()) return;
+
+  const axisVal = parseInt(document.getElementById('patternAxis')?.value || 4);
+  
+  const newCustomPattern = {
+    name: patternName.trim(),
+    axis: axisVal,
+    layers: JSON.parse(JSON.stringify(layers)) // Captures current active bands
+  };
+
+  // Add to library and save to localStorage
+  savedPatternLibrary.unshift(newCustomPattern);
+  try {
+    localStorage.setItem(STORAGE_PREFIX + "pats", JSON.stringify(savedPatternLibrary));
+  } catch (e) {}
+
+  currentPatternTitle = newCustomPattern.name;
+
+  // Refresh UI elements
+  if (typeof renderPatternLibraryList === 'function') renderPatternLibraryList();
+  if (typeof syncPatternDropdownWithLibrary === 'function') syncPatternDropdownWithLibrary();
+  
+  alert(`Successfully saved "${newCustomPattern.name}" to your Pattern Library! It is now fully integrated across all tabs.`);
+}
+
 </body>
 </html>
